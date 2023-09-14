@@ -1,3 +1,6 @@
+
+require('dotenv').config()
+
 const express = require('express');
 const path = require('path');
 const methodOverride = require('method-override')
@@ -7,19 +10,25 @@ const LocalStrategy = require('passport-local')
 const Client = require('./models/client')
 const mongoose = require('mongoose');
 const session = require('express-session')
-require('dotenv').config()
+const MongoStore = require('connect-mongo');
+const helmet = require('helmet');
+
 //create the db connection (dbname = yelp-camp)
 mongoose.connect(process.env.MONGO_URI,
     { useNewUrlParser: true})
     .then(()=> console.log('DB Connected!!'))
     .catch(err=> console.error(err))
 const ejsMate = require('ejs-mate');
+const mongoSanitize = require('express-mongo-sanitize');
+
+
 
 const { campgroundSchema, reviewSchema } = require('./schemas.js')
 const catchAsync = require('./utils/catchAsync')
 const ExpressError = require('./utils/ExpressError')
 const Campground = require('./models/campground')
 const Review = require('./models/review')
+const User = require('./models/client')
 
 const userRoutes = require('./routes/users')
 const campgroundRoutes = require('./routes/campgrounds')
@@ -43,24 +52,97 @@ app.use(express.urlencoded({extended: true}))
 app.use(methodOverride('_method'))
 app.use(express.static(path.join(__dirname, 'public')))
 
+app.use(mongoSanitize());
+
+const store = MongoStore.create({
+    mongoUrl: process.env.MONGO_URI,
+    touchAfter: 24 * 60 * 60,
+    crypto:{
+        secret: 'thisshouldbeabettersecret!',
+    }
+});
+
+store.on("error", function(e) {
+    console.log("Session Store Error", e)
+});
+
+
+
 const sessionConfig = {
+    store,
+    name: 'yelpcampsession',
     secret: 'thisshouldbeabettersecret!',
     resave: false,
-    saveUninitaled: true,
+    saveUninitialized: false,
     cookie: {
         httpOnly: true,
+        // secure: true,
         expires: Date.now() * 1000 * 60 * 60 * 24 * 7,
         maxAge: 1000 * 60 * 60 * 24 * 7
     }
 }
 app.use(session(sessionConfig));
 app.use(flash());
+app.use(helmet());
 
-app.use((req, res, next)=>{
-    res.locals.messages = req.flash("success")
-    res.locals.error = req.flash("error")
-    next();
-})
+ const scriptSrcUrls = [
+    "https://stackpath.bootstrapcdn.com/",
+    "https://api.tiles.mapbox.com/",
+    "https://api.mapbox.com/",
+    "https://kit.fontawesome.com/",
+    "https://cdnjs.cloudflare.com/",
+    "https://events.mapbox.com",
+    "https://cdn.jsdelivr.net/",
+    "https://res.cloudinary.com/dxarelvy7/"
+];
+const styleSrcUrls = [
+    "https://kit-free.fontawesome.com/",
+    "https://stackpath.bootstrapcdn.com/",
+    "https://api.mapbox.com/",
+    "https://api.tiles.mapbox.com/",
+    "https://fonts.googleapis.com/",
+    "https://use.fontawesome.com/",
+    "https://cdn.jsdelivr.net/",
+    "https://res.cloudinary.com/dxarelvy7/"
+];
+const connectSrcUrls = [
+    "https://api.tiles.mapbox.com/",
+    "https://api.mapbox.com/",
+    "https://events.mapbox.com/",
+    "https://res.cloudinary.com/dxarelvy7/",
+    "https://fonts.gstatic.com/"
+
+];
+const fontSrcUrls = [
+    "https://res.cloudinary.com/dxarelvy7/",
+    "https://fonts.gstatic.com/",
+ ];
+
+app.use(
+    helmet({
+        contentSecurityPolicy: {
+            directives : {
+                defaultSrc : [],
+                connectSrc : [ "'self'", ...connectSrcUrls ],
+                scriptSrc  : [ "'unsafe-inline'", "'self'", ...scriptSrcUrls ],
+                styleSrc   : [ "'self'", "'unsafe-inline'", ...styleSrcUrls ],
+                workerSrc  : [ "'self'", "blob:" ],
+                objectSrc  : [],
+                imgSrc     : [
+                    "'self'",
+                    "blob:",
+                    "data:",
+                    "https://res.cloudinary.com/dxarelvy7/", //SHOULD MATCH YOUR CLOUDINARY ACCOUNT!
+                    "https://images.unsplash.com/"
+                ],
+                fontSrc    : [ "'self'", ...fontSrcUrls ],
+                mediaSrc   : [ "https://res.cloudinary.com/dxarelvy7/", ],
+                childSrc   : [ "blob:" ]
+            }
+        },
+        crossOriginEmbedderPolicy: false
+    })
+);
 
 
 app.use(passport.initialize())
@@ -71,7 +153,7 @@ passport.serializeUser(Client.serializeUser());
 passport.deserializeUser(Client.deserializeUser())
 
 app.use((req, res, next) => {
-    console.log(req.session)
+    // console.log(req.session)
     res.locals.currentUser = req.user;
     res.locals.success = req.flash('success');
     res.locals.error = req.flash('error');
@@ -113,6 +195,12 @@ app.get('/', (req, res) => {
 
 app.all('*', (req, res, next) => {
     next(new ExpressError('Page Not Found', 404))
+})
+
+app.use((err, req, res, next) => {
+    const { statusCode = 500 } = err;
+    if (!err.message) err.message = 'Oh No, Something Went Wrong!'
+    res.status(statusCode).render('error', { err })
 })
 
 
