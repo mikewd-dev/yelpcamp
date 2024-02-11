@@ -6,9 +6,6 @@
 
 - [Description](#description)
 - [How To Use](#how-to-use)
-- [How To Contribute](#how-to-contribute)
-- [Predevelopment](#predevelopment)
-- [Further Development](#further-development)
 - [License](#license)
 
 
